@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
 
 import java.util.*;
 
@@ -25,9 +26,10 @@ public class Controller {
 
         try{
             for (Map.Entry<String, String> entry : methodsAndURLs.entrySet()) {
-                ResponseEntity<String> response = restServiceCaller.requestAsync(params,HttpMethod.resolve(entry.getKey()),entry.getValue());
-                methodsAndURLs.put(entry.getKey(),response.getBody());
-                System.out.println(entry.getKey() + "  :  " +response.getBody());
+                Mono<ResponseEntity<String>> response = restServiceCaller.request(params,HttpMethod.resolve(entry.getKey()),entry.getValue());
+                ResponseEntity<String> res = response.block();
+                methodsAndURLs.put(entry.getKey(), res.getBody());
+                System.out.println(entry.getKey() + "  :  " + res.getBody());
             }
             return methodsAndURLs.toString();
         } catch (Exception e) {
