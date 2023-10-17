@@ -13,7 +13,6 @@ import java.util.stream.Collectors;
 @Component
 public class RestServiceCaller {
     private final WebClient webClient = WebClient.create();
-//    ResponseEntity<String> response;
 
     public Mono<ResponseEntity<String>> request(String message, HttpMethod method, String URL){
         boolean async = true;
