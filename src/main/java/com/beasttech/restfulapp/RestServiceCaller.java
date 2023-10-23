@@ -12,28 +12,17 @@ import java.util.stream.Collectors;
 
 @Component
 public class RestServiceCaller {
-    private final WebClient webClient = WebClient.create();
 
     public Mono<ResponseEntity<String>> request(String message, HttpMethod method, String URL){
-        boolean async = true;
+
 
         WebClient.ResponseSpec request = prepareRequest(URL, method, message).retrieve();
         Mono<ResponseEntity<String>> responseMono = responseHandler(request);
-        if (async){
-            responseMono.subscribe(
-                    responseEntity -> {
-                        System.out.println("SUCCESS: " + responseEntity.getBody());
-                        },
-                    error -> {
-                        System.out.println("Error: " + error.getMessage());
-                    }
-            );
-            return Mono.just(ResponseEntity.status(HttpStatus.ACCEPTED).body("Async request initiated."))
-                    .then(responseMono);
-        } else {
-            responseMono.onErrorResume(Exception.class,Mono::error).block();
-            return responseMono;
-        }
+        return responseMono
+                .doOnSuccess(responseEntity -> System.out.println("SUCCESS: " + responseEntity.getBody()))
+                .doOnError(error -> System.out.println("Error: " + error.getMessage()))
+                .thenReturn(ResponseEntity.status(HttpStatus.ACCEPTED).body("Async request initiated."))
+                .onErrorResume(Exception.class, error -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing request.")));
 
     }
 
@@ -59,6 +48,7 @@ public class RestServiceCaller {
     }
 
     private WebClient.RequestBodySpec prepareRequest(String URL, HttpMethod method, String message){
+        WebClient webClient = WebClient.create();
         WebClient.RequestBodySpec request = null;
         if (HttpMethod.GET.equals(method)){
             request = (WebClient.RequestBodySpec) webClient.get().uri(messageToURI(message, URL));
