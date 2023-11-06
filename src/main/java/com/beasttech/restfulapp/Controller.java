@@ -1,6 +1,5 @@
 package com.beasttech.restfulapp;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,10 +11,6 @@ import java.util.*;
 
 @RestController
 public class Controller {
-
-    @Autowired
-    RestServiceCaller restServiceCaller;
-
     @GetMapping("/apiget")
     public String getEndPoint(@RequestParam("params") String params){
         Map<String, String> methodsAndURLs = new HashMap<>();
@@ -25,12 +20,26 @@ public class Controller {
         methodsAndURLs.put("DELETE", "http://localhost:8090/async/deletetest");
 
         try{
+            RestServiceCaller restServiceCaller = new RestServiceCaller();
             for (Map.Entry<String, String> entry : methodsAndURLs.entrySet()) {
-                Mono<ResponseEntity<String>> response = restServiceCaller.request(params,HttpMethod.resolve(entry.getKey()),entry.getValue());
-                ResponseEntity<String> res = response.block();
-                methodsAndURLs.put(entry.getKey(), res.getBody());
-                System.out.println(entry.getKey() + "  :  " + res.getBody());
+                Mono<ResponseEntity<String>> response = restServiceCaller.request(params,HttpMethod.resolve(entry.getKey()),entry.getValue(), false);
+                response.subscribe(
+                       works -> {
+                           System.out.println(works.getStatusCode());
+                           System.out.println(works);
+                       },
+                        Throwable::printStackTrace
+                );
             }
+            //manual multi-part test
+            Mono<ResponseEntity<String>> response_MP = restServiceCaller.request(params,HttpMethod.resolve("POST"),"http://localhost:8090/upload", true);
+            response_MP.subscribe(
+                    works -> {
+                        System.out.println(works.getStatusCode());
+                        System.out.println(works);
+                    },
+                    Throwable::printStackTrace
+            );
             return methodsAndURLs.toString();
         } catch (Exception e) {
             throw new RuntimeException(e);
