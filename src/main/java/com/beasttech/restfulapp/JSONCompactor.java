@@ -7,6 +7,8 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,6 +93,13 @@ public class JSONCompactor {
             System.err.println("Chunk " + chunkNumber + " upload failed with status code: " +
                     response.getStatusCodeValue());
             // Add your error handling logic here for failed uploads.
+        }
+    }
+    public static void saveCompactedJsonToFile(String compactedJson, String filePath) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
+            writer.write(compactedJson);
+        } catch (IOException e) {
+            e.printStackTrace(); // Handle the exception appropriately
         }
     }
 }
