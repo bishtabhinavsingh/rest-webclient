@@ -1,87 +1,96 @@
 package com.beasttech.restfulapp;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-@Service
 public class JSONCompactor {
-
-    private final ObjectMapper objectMapper;
     private final WebClient webClient;
-    private final List<Object> batch;
-    private final int maxBatchSizeBytes;
-    private int currentBatchSizeBytes;
+    private final Path tempDirectory;
 
-    public JSONCompactor(ObjectMapper objectMapper, WebClient.Builder webClientBuilder) {
-        this.objectMapper = objectMapper;
-        this.webClient = webClientBuilder.baseUrl("http://remote-server.com").build();
-        this.batch = new ArrayList<>();
-        this.maxBatchSizeBytes = 1024 * 1024 * 2; // 2 MB limit for example
-        this.currentBatchSizeBytes = 0;
+    public JSONCompactor(WebClient.Builder webClientBuilder, String tempDirectoryPath) throws IOException {
+        this.webClient = webClientBuilder.baseUrl("http:localhost:8090/upload-batch").build();
+        this.tempDirectory = createTempDirectory(tempDirectoryPath);
     }
 
-    public synchronized void addToBatch(Object object) throws JsonProcessingException {
-        String json = objectMapper.writeValueAsString(object);
-        byte[] jsonBytes = json.getBytes(StandardCharsets.UTF_8);
-        int jsonSize = jsonBytes.length;
-
-        // Check if adding this object exceeds the batch size limit
-        if (currentBatchSizeBytes + jsonSize > maxBatchSizeBytes) {
-            // If so, send the current batch
-            sendBatch();
-            // And clear the batch
-            batch.clear();
-            currentBatchSizeBytes = 0;
-        }
-
-        // Add the object to the batch and update the current size
-        batch.add(object);
-        currentBatchSizeBytes += jsonSize;
+    private Path createTempDirectory(String tempDirectoryPath) throws IOException {
+        Path tempDir = Files.createTempDirectory(tempDirectoryPath);
+        return tempDir.toAbsolutePath();
     }
 
-    public synchronized void sendBatch() {
-        if (!batch.isEmpty()) {
-            String compactedJson;
+    public void uploadChunks(byte[][] chunks) {
+        int totalChunks = chunks.length;
+
+        for (int i = 0; i < totalChunks; i++) {
+            byte[] chunkData = chunks[i];
+            int chunkNumber = i + 1;
+            int currentChunkSize = chunkData.length;
+
+            // Log the current chunk information
+            logChunkInfo(chunkNumber, currentChunkSize, totalChunks);
+
+            // Save the current chunk to the temporary directory
             try {
-                compactedJson = objectMapper.writeValueAsString(batch);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException("Failed to serialize batch", e);
+                saveChunkToFile(chunkData, chunkNumber);
+            } catch (IOException e) {
+                System.err.println("Error saving Chunk " + chunkNumber + " to temporary directory: " + e.getMessage());
+                continue; // Skip this chunk and continue with the next one
             }
 
-            MultiValueMap<String, Object> bodyValues = new LinkedMultiValueMap<>();
-            bodyValues.add("file", new ByteArrayResource(compactedJson.getBytes()) {
-                @Override
-                public String getFilename() {
-                    return "batch.json";
-                }
-            });
-
-            String response = webClient.post()
-                    .uri("/upload-endpoint") // Replace with the actual endpoint
-                    .contentType(MediaType.MULTIPART_FORM_DATA)
-                    .body(BodyInserters.fromMultipartData(bodyValues))
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block(); // Handle this properly in reactive style
-
-            System.out.println("Batch sent. Server response: " + response);
+            // Upload the current chunk
+            uploadChunk(chunkNumber)
+                    .doOnError(error -> handleChunkUploadError(chunkNumber, error))
+                    .subscribe(response -> handleChunkUploadSuccess(chunkNumber, response));
         }
     }
 
-    // Call this method to flush the remaining batch if needed
-    public synchronized void flushBatch() {
-        sendBatch();
-        batch.clear();
-        currentBatchSizeBytes = 0;
+    private void logChunkInfo(int chunkNumber, int chunkSize, int totalChunks) {
+        System.out.println("Uploading Chunk " + chunkNumber + " of " + totalChunks +
+                " (Size: " + chunkSize + " bytes)");
+    }
+
+    private void saveChunkToFile(byte[] chunkData, int chunkNumber) throws IOException {
+        String fileName = "chunk_" + chunkNumber + ".dat";
+        Path filePath = tempDirectory.resolve(fileName);
+        Files.write(filePath, chunkData, StandardOpenOption.CREATE);
+    }
+
+    private Mono<ResponseEntity<Void>> uploadChunk(int chunkNumber) {
+        String fileName = "chunk_" + chunkNumber + ".dat";
+        Path filePath = tempDirectory.resolve(fileName);
+
+        return webClient.post()
+                .body(BodyInserters.fromResource(new ByteArrayResource(Files.readAllBytes(filePath))))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return Mono.just(ResponseEntity.ok().build());
+                    } else {
+                        return Mono.just(ResponseEntity.status(response.statusCode()).build());
+                    }
+                });
+    }
+
+    private void handleChunkUploadError(int chunkNumber, Throwable error) {
+        System.err.println("Error uploading Chunk " + chunkNumber + ": " + error.getMessage());
+        // Add your error handling logic here, e.g., retry, log, or handle differently.
+    }
+
+    private void handleChunkUploadSuccess(int chunkNumber, ResponseEntity<Void> response) {
+        if (response.getStatusCode() == HttpStatus.OK) {
+            System.out.println("Chunk " + chunkNumber + " uploaded successfully");
+            // Add any success handling logic here if needed.
+        } else {
+            System.err.println("Chunk " + chunkNumber + " upload failed with status code: " +
+                    response.getStatusCodeValue());
+            // Add your error handling logic here for failed uploads.
+        }
     }
 }
